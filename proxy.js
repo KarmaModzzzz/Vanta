@@ -3,9 +3,13 @@
  * The only external dependency is the Wisp WebSocket endpoint (see config.js).
  */
 (function () {
-  // Works at the repo root ("/") and at a project path ("/Vanta/").
+  // Bump this whenever sw.js / worker paths change. It forces the browser to
+  // treat these as new URLs, so it can't reuse a stuck SharedWorker or a
+  // corrupted IndexedDB record left over from an older deploy.
+  const V = "3";
   const BASE = location.pathname.replace(/[^/]*$/, "");
   const SETTINGS_KEY = "vanta-settings";
+  const BOOT_TIMEOUT_MS = 9000;
 
   let controller = null;
   let connection = null;
@@ -27,6 +31,59 @@
     el.style.color = ok === false ? "#ff4d6d" : ok === true ? "#7ee787" : "#666";
   }
 
+  function withTimeout(promise, ms, message) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error(message)), ms);
+      promise.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    });
+  }
+
+  // Wipes any leftover scramjet/bare-mux IndexedDB databases. Needed because
+  // a schema mismatch between deploys shows up as
+  // "NotFoundError: ...object store was not found" and wedges everything.
+  async function wipeStorage() {
+    try {
+      if (!indexedDB.databases) return;
+      const dbs = await indexedDB.databases();
+      await Promise.all(
+        dbs
+          .filter((d) => /scramjet|bare-?mux/i.test(d.name || ""))
+          .map(
+            (d) =>
+              new Promise((res) => {
+                const req = indexedDB.deleteDatabase(d.name);
+                req.onsuccess = req.onerror = req.onblocked = () => res();
+              })
+          )
+      );
+    } catch (e) {
+      console.warn("[VANTA proxy] wipeStorage failed", e);
+    }
+  }
+
+  async function unregisterServiceWorkers() {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.filter((r) => (r.scope || "").includes(BASE)).map((r) => r.unregister()));
+    } catch (e) {
+      console.warn("[VANTA proxy] unregister failed", e);
+    }
+  }
+
+  // Full teardown: kills the service worker registration and wipes storage
+  // so the next boot() starts completely clean. Doesn't kill an already-live
+  // SharedWorker in *other* open tabs of this site — closing those tabs is
+  // still the only way to do that; this is the automatic half of the fix.
+  async function hardReset() {
+    controller = null;
+    connection = null;
+    booting = null;
+    status("resetting...");
+    await unregisterServiceWorkers();
+    await wipeStorage();
+    status("reset — press GO to reconnect");
+  }
+
   async function boot() {
     if (!window.isSecureContext) {
       throw new Error("Service workers need https:// (or localhost). Open the GitHub Pages URL, not the local file.");
@@ -38,21 +95,23 @@
       throw new Error("No Wisp server configured. Add one in Settings.");
     }
 
+    await wipeStorage();
+
     status("registering service worker...");
-    await navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE });
+    await navigator.serviceWorker.register(BASE + "sw.js?v=" + V, { scope: BASE });
     await navigator.serviceWorker.ready;
 
     status("connecting transport...");
-    connection = new BareMux.BareMuxConnection(BASE + "baremux/worker.js");
-    await connection.setTransport(BASE + "epoxy/index.mjs", [{ wisp: wispUrl() }]);
+    connection = new BareMux.BareMuxConnection(BASE + "baremux/worker.js?v=" + V);
+    await connection.setTransport(BASE + "epoxy/index.mjs?v=" + V, [{ wisp: wispUrl() }]);
 
     const { ScramjetController } = $scramjetLoadController();
     controller = new ScramjetController({
       prefix: BASE + "service/",
       files: {
-        wasm: BASE + "scram/scramjet.wasm.wasm",
-        all: BASE + "scram/scramjet.all.js",
-        sync: BASE + "scram/scramjet.sync.js"
+        wasm: BASE + "scram/scramjet.wasm.wasm?v=" + V,
+        all: BASE + "scram/scramjet.all.js?v=" + V,
+        sync: BASE + "scram/scramjet.sync.js?v=" + V
       },
       flags: {
         strictRewrites: true,
@@ -71,21 +130,24 @@
 
   function ready() {
     if (!booting) {
-      booting = boot().catch((err) => {
+      booting = withTimeout(
+        boot(),
+        BOOT_TIMEOUT_MS,
+        "Timed out connecting — a stuck cache from an earlier deploy is the usual cause."
+      ).catch(async (err) => {
         booting = null;
+        // Self-heal: whatever got stuck, clear it so the *next* click starts fresh.
+        await hardReset();
         throw err;
       });
     }
     return booting;
   }
 
-  // Called from Settings when the Wisp URL changes.
+  // Called from Settings when the Wisp URL changes, or from the manual
+  // "Reset proxy" button.
   function reset() {
-    controller = null;
-    connection = null;
-    booting = null;
-    status("not connected");
-    wakeHost();
+    return hardReset();
   }
 
   function openFrame(url) {
@@ -122,17 +184,16 @@
       openFrame(url);
     } catch (err) {
       console.error("[VANTA proxy]", err);
-      status(err.message || "failed to start", false);
-      window.VANTA_TOAST && window.VANTA_TOAST(err.message || "Proxy failed to start");
+      status((err.message || "failed to start") + " — reset, try GO again", false);
+      window.VANTA_TOAST && window.VANTA_TOAST(err.message || "Proxy failed to start — try again");
     }
   }
 
-  window.VantaProxy = { launch, ready, reset, wispUrl, status };
+  window.VantaProxy = { launch, ready, reset, hardReset, wispUrl, status };
 
   // Free hosts like Render sleep after idle. Ping the plain http(s) URL as
   // soon as the site opens so the instance is (hopefully) awake by the time
-  // someone visits the Proxy page and hits GO. This is fire-and-forget —
-  // it doesn't block anything and its failure/success isn't reported.
+  // someone visits the Proxy page and hits GO. Fire-and-forget.
   function wakeHost() {
     const w = wispUrl();
     if (!w) return;
@@ -141,7 +202,6 @@
   }
   wakeHost();
 
-  // Pre-warm the service worker so the first click is fast.
   if (wispUrl()) {
     status("idle — press GO to connect");
   } else {
