@@ -139,6 +139,19 @@ $("#wispApply").onclick=()=>{
   window.VantaProxy?.reset();
   toast(settings.wisp?"Wisp endpoint updated":"Using the default Wisp endpoint");
 };
+$("#proxyReset").onclick=async()=>{
+  toast("Resetting proxy...");
+  await window.VantaProxy?.hardReset();
+  toast("Proxy reset. If it still hangs, close every tab of this site and reopen it.");
+};
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.addEventListener("message",e=>{
+    if(e.data?.type==="vanta-sw-corrupt"){
+      window.VantaProxy?.hardReset();
+      toast("Proxy storage was corrupted — reset automatically. Press GO again.");
+    }
+  });
+}
 $("#resetSettings").onclick=()=>{settings={...defaults};save();applySettings();toast("Settings reset")};
 
 let searchDebounce=null;
