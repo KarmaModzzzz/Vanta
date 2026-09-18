@@ -6,7 +6,7 @@
   // Bump this whenever sw.js / worker paths change. It forces the browser to
   // treat these as new URLs, so it can't reuse a stuck SharedWorker or a
   // corrupted IndexedDB record left over from an older deploy.
-  const V = "3";
+  const V = "4";
   const BASE = location.pathname.replace(/[^/]*$/, "");
   const SETTINGS_KEY = "vanta-settings";
   const BOOT_TIMEOUT_MS = 9000;
