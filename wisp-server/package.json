@@ -1,0 +1,7 @@
+{
+  "name": "vanta-wisp",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "wisp-server-node": "^1.1.3" }
+}
