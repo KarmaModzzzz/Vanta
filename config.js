@@ -6,4 +6,4 @@
 // the site itself is served over https.
 //
 // Users can override this per-browser on the Settings page.
-window.VANTA_WISP_URL = "wss://wisp.mercurywork.shop/";
+window.VANTA_WISP_URL = "wss://vanta-jarz.onrender.com/";
