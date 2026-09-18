@@ -111,6 +111,7 @@
           <div class="settings-card"><h3>Proxy</h3>
             <label><span>Wisp endpoint<small>WebSocket server Scramjet tunnels through</small></span><input id="wispUrl" type="url" placeholder="wss://your-server.example/wisp/" spellcheck="false"></label>
             <label><span>Reconnect<small>Apply a new endpoint without reloading</small></span><button id="wispApply" class="outline-btn">APPLY</button></label>
+            <label><span>Reset proxy<small>Fixes a stuck/frozen proxy connection</small></span><button id="proxyReset" class="outline-btn">RESET PROXY</button></label>
           </div>
           <div class="settings-card"><h3>Browser</h3>
             <label><span>Confirm before leaving<small>Ask before navigating away when supported</small></span><input class="toggle" id="leaveConfirm" type="checkbox" checked></label>
@@ -125,8 +126,8 @@
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js"></script>
   <script src="config.js"></script>
-  <script src="baremux/index.js"></script>
-  <script src="scram/scramjet.bundle.js"></script>
+  <script src="baremux/index.js?v=3"></script>
+  <script src="scram/scramjet.bundle.js?v=3"></script>
   <script src="proxy.js"></script>
   <script src="app.js"></script>
 </body>
